@@ -15,7 +15,9 @@ const uint8_t spr[8] = {
     0b01111110,
 };
 
-void loop()
+void update() {}
+
+void draw()
 {
     cls(30, 30, 30);
 
@@ -54,6 +56,6 @@ void loop()
 int main()
 {
     init(W, H, 4, 30);
-    run(&loop);
+    run(&update, &draw);
     return 0;
 }

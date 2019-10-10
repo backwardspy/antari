@@ -168,7 +168,8 @@ struct
 {
     SDL_Window *window;
     SDL_Renderer *renderer;
-    SDL_Surface *vbuf;
+    SDL_Texture *vbuf;
+    uint8_t *vbuf_pixels;
     uint32_t w, h;
     uint32_t frame_ticks; // target ticks/frame
     uint32_t ticks;
@@ -189,7 +190,7 @@ void init(uint32_t w, uint32_t h, uint32_t scale, uint32_t fps)
     state.textbuf.buf = (char *)malloc(state.textbuf.len * sizeof(char));
     ECHECK(SDL_Init(SDL_INIT_VIDEO));
     ECHECK(SDL_CreateWindowAndRenderer(state.w * scale, state.h * scale, 0, &state.window, &state.renderer));
-    state.vbuf = SDL_CreateRGBSurfaceWithFormat(0, state.w, state.h, 32, SDL_PIXELFORMAT_RGBA32);
+    state.vbuf = SDL_CreateTexture(state.renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, state.w, state.h);
     if (state.vbuf == NULL)
     {
         DIE("failed to create vbuf: %s\n", SDL_GetError());
@@ -202,12 +203,13 @@ void quit()
     free(state.textbuf.buf);
     state.textbuf.buf = NULL;
     state.textbuf.len = 0;
+    SDL_DestroyTexture(state.vbuf);
     SDL_DestroyRenderer(state.renderer);
     SDL_DestroyWindow(state.window);
     SDL_Quit();
 }
 
-void run(framefn_t framefn)
+void run(framefn_t update, framefn_t draw)
 {
     bool running = true;
     uint32_t last_ticks = SDL_GetTicks();
@@ -224,23 +226,24 @@ void run(framefn_t framefn)
                 break;
             }
         }
-        SDL_LockSurface(state.vbuf);
 
-        while (accumulator >= state.frame_ticks)
-        {
-            accumulator -= state.frame_ticks;
-            framefn();
-        }
-        SDL_UnlockSurface(state.vbuf);
-        SDL_Texture *vtex = SDL_CreateTextureFromSurface(state.renderer, state.vbuf);
-        if (vtex == NULL)
-        {
-            DIE("failed to create vtex: %s\n", SDL_GetError());
-        }
-        SDL_RenderCopy(state.renderer, vtex, NULL, NULL);
-        SDL_RenderPresent(state.renderer);
+        int pitch;
 
-        SDL_DestroyTexture(vtex);
+        if (accumulator >= state.frame_ticks) // do we have anything to do
+        {
+            while (accumulator >= state.frame_ticks)
+            {
+                accumulator -= state.frame_ticks;
+                update();
+            }
+
+            SDL_LockTexture(state.vbuf, NULL, (void *)&state.vbuf_pixels, &pitch);
+            draw();
+            SDL_UnlockTexture(state.vbuf);
+
+            SDL_RenderCopy(state.renderer, state.vbuf, NULL, NULL);
+            SDL_RenderPresent(state.renderer);
+        }
 
         uint32_t ticks = SDL_GetTicks();
         accumulator += ticks - last_ticks;
@@ -254,7 +257,7 @@ void run(framefn_t framefn)
 void cls(uint8_t r, uint8_t g, uint8_t b)
 {
     uint32_t col = RGBHEX(r, g, b);
-    uint32_t *pixels = state.vbuf->pixels;
+    uint32_t *pixels = (uint32_t *)state.vbuf_pixels;
     for (int y = 0; y < state.h; ++y)
     {
         for (int x = 0; x < state.w; ++x)
@@ -270,7 +273,7 @@ void dot(int32_t x, int32_t y, uint8_t r, uint8_t g, uint8_t b)
     {
         return;
     }
-    ((uint32_t *)state.vbuf->pixels)[x + y * state.w] = RGBHEX(r, g, b);
+    ((uint32_t *)state.vbuf_pixels)[x + y * state.w] = RGBHEX(r, g, b);
 }
 
 void hline(int32_t y, int32_t x0, int32_t x1, uint8_t r, uint8_t g, uint8_t b)
@@ -364,7 +367,7 @@ void text(int32_t x, int32_t y, uint8_t r, uint8_t g, uint8_t b, const char *fmt
     size_t nchars = strlen(state.textbuf.buf);
     for (size_t c = 0; c < nchars; ++c)
     {
-        sprite(x + c * 8, y, r, g, b, FONT[state.textbuf.buf[c]]);
+        sprite(x + c * 8, y, r, g, b, FONT[(size_t)state.textbuf.buf[c]]);
     }
 }
 
