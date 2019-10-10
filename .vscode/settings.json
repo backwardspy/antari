@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "antari.h": "c",
+        "stdbool.h": "c"
+    }
+}
